@@ -18,6 +18,11 @@ on:
           - staging
           - production
 
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
 jobs:
   selenium-matrix-tests:
     runs-on: ubuntu-latest
@@ -49,6 +54,8 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
+        pip install pytest
+        pip install selenium
         pip install -r requirements.txt
         
     - name: Install Chrome and ChromeDriver
@@ -57,7 +64,7 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y google-chrome-stable
         
-    - name: Install Firefox and GeckoDriver
+    - name: Install Firefox binary and GeckoDriver
       if: matrix.browser == 'firefox'
       run: |
         sudo apt-get update
@@ -74,21 +81,23 @@ jobs:
         tar -xvzf geckodriver-v0.36.0-linux64.tar.gz
         sudo mv geckodriver /usr/local/bin/
         sudo chmod +x /usr/local/bin/geckodriver
-        
+
+
+
     - name: Run Selenium tests
       env:
         HEADLESS: true
         BROWSER: ${{ matrix.browser }}
         SCREEN_WIDTH: ${{ matrix.resolution.width }}
         SCREEN_HEIGHT: ${{ matrix.resolution.height }}
-        OLLAMA_URL: http://${{secrets.EC2_PUBLIC_IP}}:3000
+        OLLAMA_URL: http://${{ secrets.EC2_PUBLIC_IP }}:3000
         TEST_NAME: ${{ matrix.browser }}-${{ matrix.resolution.name }}
         ENVIRONMENT: ${{ github.event.inputs.environment || 'staging' }}
       run: |
         mkdir -p allure-results
         # Run your tests here with unique result directory
         pytest --alluredir=allure-results tests/
-      
+          
     - name: Upload Allure results as artifact
       uses: actions/upload-artifact@v4
       if: always()  # Upload even if tests fail
@@ -130,7 +139,7 @@ jobs:
           gh_pages: gh-pages
           allure_history: allure-history
           keep_reports: 20
-  
+   
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
         with:
