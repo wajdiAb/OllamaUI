@@ -1,4 +1,4 @@
 "DESCRIPTION","DURATION IN MS","NAME","PARENT SUITE","START TIME","STATUS","STOP TIME","SUB SUITE","SUITE","TEST CLASS","TEST METHOD"
-"","611","test_send_message","tests","Thu Aug 21 10:23:35 UTC 2025","broken","Thu Aug 21 10:23:36 UTC 2025","ExampleTestCase","test_example","",""
-"","670","test_page_title","tests","Thu Aug 21 10:23:35 UTC 2025","broken","Thu Aug 21 10:23:35 UTC 2025","ExampleTestCase","test_example","",""
-"","2959","test_change_name","tests","Thu Aug 21 10:23:23 UTC 2025","broken","Thu Aug 21 10:23:26 UTC 2025","ExampleTestCase","test_example","",""
+"","6610","test_send_message","tests","Thu Aug 21 10:25:51 UTC 2025","passed","Thu Aug 21 10:25:58 UTC 2025","ExampleTestCase","test_example","",""
+"","4798","test_page_title","tests","Thu Aug 21 10:25:47 UTC 2025","passed","Thu Aug 21 10:25:51 UTC 2025","ExampleTestCase","test_example","",""
+"","11122","test_change_name","tests","Thu Aug 21 10:25:35 UTC 2025","passed","Thu Aug 21 10:25:47 UTC 2025","ExampleTestCase","test_example","",""
