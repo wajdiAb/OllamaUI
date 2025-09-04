@@ -1,22 +1,38 @@
-version: "3.9"
-
 services:
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11435:11434"
+    volumes:
+      - ollama:/root/.ollama
+    restart: unless-stopped
+
   yolo:
-    image: wajdiab/yolo:0.0.1
+    image: wajdiab/yolo:0.0.3
     ports:
       - "8080:8080"
     volumes:
       - ./uploads:/app/uploads
+      - /home/wajdi/.aws/credentials:/root/.aws/credentials:ro
     restart: unless-stopped
     environment:
       - PYTHONUNBUFFERED=1
 
   ollama-ui:
-    image: wajdiab/ollama-ui:0.0.2
+    image: wajdiab/ollama-ui:1.0.1
     ports:
       - "3000:3000"
+    volumes:
+      - ./uploads:/app/uploads
+      - /home/wajdi/.aws/credentials:/root/.aws/credentials:ro
     restart: unless-stopped
     environment:
       - PORT=3000
       - YOLO_SERVICE=yolo:8080
-    command: ["npm", "start", "--", "-H", "0.0.0.0"]
+      - OLLAMA_URL=http://ollama:11434
+      - AWS_REGION=eu-west-1
+      - AWS_S3_BUCKET=wajdi-abu-rish
+
+
+volumes:
+  ollama:
