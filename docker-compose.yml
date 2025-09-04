@@ -1,14 +1,20 @@
 services:
-  ollama:
-    image: ollama/ollama:latest
-    ports:
-      - "11435:11434"
+  
+  postgres:
+    image: postgres:16
+    container_name: postgres
+    environment:
+      POSTGRES_DB: predictions
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: pass
     volumes:
-      - ollama:/root/.ollama
+      - pgdata:/var/lib/postgresql/data
     restart: unless-stopped
 
+
   yolo:
-    image: wajdiab/yolo:0.0.3
+    image: wajdiab/yolo:0.0.4
+    container_name: YOLO_SERVICE
     ports:
       - "8080:8080"
     volumes:
@@ -16,10 +22,19 @@ services:
       - /home/wajdi/.aws/credentials:/root/.aws/credentials:ro
     restart: unless-stopped
     environment:
-      - PYTHONUNBUFFERED=1
+      PYTHONUNBUFFERED: "1"
+      DB_BACKEND: postgres
+      DATABASE_URL: postgresql+psycopg2://user:pass@postgres:5432/predictions
+      POSTGRES_DB: predictions
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: pass
+    depends_on:
+        - postgres
+        
 
   ollama-ui:
     image: wajdiab/ollama-ui:1.0.1
+    container_name: ollama-ui
     ports:
       - "3000:3000"
     volumes:
@@ -27,12 +42,12 @@ services:
       - /home/wajdi/.aws/credentials:/root/.aws/credentials:ro
     restart: unless-stopped
     environment:
-      - PORT=3000
-      - YOLO_SERVICE=yolo:8080
-      - OLLAMA_URL=http://ollama:11434
-      - AWS_REGION=eu-west-1
-      - AWS_S3_BUCKET=wajdi-abu-rish
+      PORT: 3000
+      YOLO_SERVICE: yolo:8080
+      OLLAMA_URL: http://ollama:11434
+      AWS_REGION: eu-west-1
+      AWS_S3_BUCKET: wajdi-abu-rish
 
 
 volumes:
-  ollama:
+  pgdata:
