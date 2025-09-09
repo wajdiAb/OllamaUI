@@ -133,7 +133,15 @@ jobs:
             npm ci
           elif [ -f requirements.txt ]; then
             python -m pip install --upgrade pip
-            pip install -r requirements.txt
+            # Filter out non-existent 'allure' package if present
+            if grep -Eq '^allure(==.*)?$' requirements.txt; then
+              echo "Filtering 'allure' from requirements.txt (not a PyPI package)"
+              sed -E '/^allure(==.*)?$/d' requirements.txt > requirements.filtered.txt
+              REQ_FILE=requirements.filtered.txt
+            else
+              REQ_FILE=requirements.txt
+            fi
+            pip install -r "$REQ_FILE"
           else
             echo "No package.json or requirements.txt found" >&2
             exit 1
