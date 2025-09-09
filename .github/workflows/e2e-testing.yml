@@ -66,6 +66,14 @@ jobs:
             # Stop and remove old containers if present
             sudo docker compose down || true
 
+            echo "Disk usage before cleanup:" && df -h || true
+            echo "Docker disk usage before cleanup:" && sudo docker system df || true
+
+            # Free up Docker space without touching named volumes (keeps Postgres data)
+            sudo docker container prune -f || true
+            sudo docker image prune -af || true
+            sudo docker builder prune -af || true
+
             # Write Compose environment variables for image selection
             cat > .env <<EOF
             OLLAMA_UI_IMG_TAG=${{ env.IMAGE_TAG }}
@@ -73,6 +81,12 @@ jobs:
             YOLO_IMG_TAG=${{ env.YOLO_IMG_TAG }}
             POSTGRES_VERSION=${{ env.POSTGRES_VERSION }}
             EOF
+
+            # Pre-pull images to surface errors early
+            sudo docker compose pull || true
+
+            echo "Disk usage after cleanup:" && df -h || true
+            echo "Docker disk usage after cleanup:" && sudo docker system df || true
 
             # Deploy updated stack
             sudo docker compose up -d
