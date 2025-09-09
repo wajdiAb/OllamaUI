@@ -147,6 +147,38 @@ jobs:
             exit 1
           fi
 
+      - name: Patch Selenium driver for CI isolation
+        working-directory: e2e
+        run: |
+          if [ -f utils/Driver_factory.py ]; then
+            python - <<'PY'
+            import os, re
+            p = 'utils/Driver_factory.py'
+            s = open(p, 'r', encoding='utf-8').read()
+            changed = False
+            # Inject unique user-data-dir and CI-friendly flags for Chrome
+            pattern = r"driver\s*=\s*webdriver\.Chrome\(options=options\)"
+            repl = (
+                "import os, tempfile\n"
+                "tmpdir = os.environ.get(\"SELENIUM_USER_DATA_DIR\") or tempfile.mkdtemp()\n"
+                "try:\n    options.add_argument(f'--user-data-dir={tmpdir}')\nexcept Exception:\n    pass\n"
+                "options.add_argument('--no-sandbox')\n"
+                "options.add_argument('--disable-dev-shm-usage')\n"
+                "options.add_argument('--headless=new')\n"
+                "driver = webdriver.Chrome(options=options)"
+            )
+            if re.search(pattern, s):
+                s = re.sub(pattern, repl, s, count=1)
+                changed = True
+
+            if changed:
+                open(p, 'w', encoding='utf-8').write(s)
+                print('Patched Chrome driver instantiation for CI isolation.')
+            else:
+                print('No Chrome driver pattern found to patch; skipping.')
+            PY
+          fi
+
       - name: Run Selenium E2E tests
         working-directory: e2e
         env:
@@ -156,6 +188,7 @@ jobs:
           OLLAMA_UI_IMG_TAG: ${{ needs.deploy.outputs.image_tag }}
           YOLO_IMG_TAG: ${{ needs.deploy.outputs.yolo_tag }}
           POSTGRES_VERSION: ${{ needs.deploy.outputs.postgres_version }}
+          SELENIUM_USER_DATA_DIR: ${{ runner.temp }}/selenium-profile-${{ matrix.browser }}-${{ matrix.resolution }}-${{ github.run_id }}-${{ github.run_attempt }}
         run: |
           # Split resolution
           WIDTH="${VIEWPORT%x*}"; HEIGHT="${VIEWPORT#*x}"
