@@ -176,28 +176,80 @@ jobs:
         working-directory: e2e
         run: |
           if [ -f utils/Driver_factory.py ]; then
-            SCRIPT=ci_patch_driver.py
-            : > "$SCRIPT"
-            echo "import re" >> "$SCRIPT"
-            echo "p = 'utils/Driver_factory.py'" >> "$SCRIPT"
-            echo "with open(p, 'r', encoding='utf-8') as f: s = f.read()" >> "$SCRIPT"
-            echo "changed = False" >> "$SCRIPT"
-            # Chrome patch
-            echo "pattern = r\"driver\\s*=\\s*webdriver\\.Chrome\\(options=options\\)\"" >> "$SCRIPT"
-            echo "repl = (\"import os, tempfile\\n\" \"tmpdir = os.environ.get('SELENIUM_USER_DATA_DIR') or tempfile.mkdtemp()\\n\" \"vp = os.environ.get('VIEWPORT')\\n\" \"try:\\n    options.add_argument(f'--user-data-dir={tmpdir}')\\nexcept Exception:\\n    pass\\n\" \"options.add_argument('--no-sandbox')\\n\" \"options.add_argument('--disable-dev-shm-usage')\\n\" \"options.add_argument('--headless=new')\\n\" \"\\n\" \"# Apply viewport if provided\\n\" \"if vp and 'x' in vp:\\n\" \"    w,h = vp.split('x',1)\\n\" \"    try:\\n        options.add_argument(f'--window-size={w},{h}')\\n    except Exception:\\n        pass\\n\" \"driver = webdriver.Chrome(options=options)\")" >> "$SCRIPT"
-            echo "s2 = re.sub(pattern, repl, s, count=1)" >> "$SCRIPT"
-            echo "changed = changed or (s2 != s)" >> "$SCRIPT"
-            # Firefox patch
-            echo "pattern_ff = r\"driver\\s*=\\s*webdriver\\.Firefox\\(options=options\\)\"" >> "$SCRIPT"
-            echo "repl_ff = (\"import os, tempfile\\n\" \"tmpdir = os.environ.get('SELENIUM_USER_DATA_DIR') or tempfile.mkdtemp()\\n\" \"vp = os.environ.get('VIEWPORT')\\n\" \"try:\\n    options.add_argument('-headless')\\nexcept Exception:\\n    pass\\n\" \"try:\\n    options.add_argument('-profile'); options.add_argument(tmpdir)\\nexcept Exception:\\n    pass\\n\" \"if vp and 'x' in vp:\\n\" \"    w,h = vp.split('x',1)\\n\" \"    try:\\n        options.add_argument(f'--width={w}')\\n        options.add_argument(f'--height={h}')\\n    except Exception:\\n        pass\\n\" \"driver = webdriver.Firefox(options=options)\")" >> "$SCRIPT"
-            echo "s3 = re.sub(pattern_ff, repl_ff, s2, count=1)" >> "$SCRIPT"
-            echo "changed = changed or (s3 != s2)" >> "$SCRIPT"
-            echo "if changed:" >> "$SCRIPT"
-            echo "    with open(p, 'w', encoding='utf-8') as f: f.write(s3)" >> "$SCRIPT"
-            echo "    print('Patched Selenium driver for CI isolation.')" >> "$SCRIPT"
-            echo "else:" >> "$SCRIPT"
-            echo "    print('No driver patterns found to patch; skipping.')" >> "$SCRIPT"
-            python "$SCRIPT"
+            cat > ci_patch_driver.py << 'EOF'
+            import os
+            import re
+            import tempfile
+
+            # Read the original file
+            with open('utils/Driver_factory.py', 'r', encoding='utf-8') as f:
+                content = f.read()
+
+            changed = False
+
+            # Chrome driver patch
+            chrome_pattern = r"driver\s*=\s*webdriver\.Chrome\(options=options\)"
+            chrome_replacement = """        import os, tempfile
+            tmpdir = os.environ.get("SELENIUM_USER_DATA_DIR") or tempfile.mkdtemp()
+            vp = os.environ.get('VIEWPORT')
+            try:
+                options.add_argument(f'--user-data-dir={tmpdir}')
+            except Exception:
+                pass
+            options.add_argument('--no-sandbox')
+            options.add_argument('--disable-dev-shm-usage')
+            options.add_argument('--headless=new')
+
+            # Apply viewport if provided
+            if vp and 'x' in vp:
+                w,h = vp.split('x',1)
+                try:
+                    options.add_argument(f'--window-size={w},{h}')
+                except Exception:
+                    pass
+            driver = webdriver.Chrome(options=options)"""
+
+                # Firefox driver patch
+                firefox_pattern = r"driver\s*=\s*webdriver\.Firefox\(options=options\)"
+                firefox_replacement = """        import os, tempfile
+            tmpdir = os.environ.get("SELENIUM_USER_DATA_DIR") or tempfile.mkdtemp()
+            vp = os.environ.get('VIEWPORT')
+            try:
+                options.add_argument('-headless')
+            except Exception:
+                pass
+            try:
+                options.add_argument('-profile')
+                options.add_argument(tmpdir)
+            except Exception:
+                pass
+            if vp and 'x' in vp:
+                w,h = vp.split('x',1)
+                try:
+                    options.add_argument(f'--width={w}')
+                    options.add_argument(f'--height={h}')
+                except Exception:
+                    pass
+            driver = webdriver.Firefox(options=options)"""
+
+            # Apply patches
+            if re.search(chrome_pattern, content):
+                content = re.sub(chrome_pattern, chrome_replacement, content)
+                changed = True
+
+            if re.search(firefox_pattern, content):
+                content = re.sub(firefox_pattern, firefox_replacement, content)
+                changed = True
+
+            if changed:
+                with open('utils/Driver_factory.py', 'w', encoding='utf-8') as f:
+                    f.write(content)
+                print('Patched Selenium driver for CI isolation.')
+            else:
+                print('No driver patterns found to patch; skipping.')
+            EOF
+
+            python ci_patch_driver.py
           fi
 
       - name: Run Selenium E2E tests
