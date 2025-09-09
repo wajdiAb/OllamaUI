@@ -33,7 +33,7 @@ services:
         
 
   ollama-ui:
-    image: wajdiab/ollama-ui:1.0.1
+    image: ${DOCKERHUB_USERNAME:-wajdiab}/ollama-ui:${OLLAMA_UI_IMG_TAG:-1.0.1}
     container_name: ollama-ui
     ports:
       - "3000:3000"

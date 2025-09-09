@@ -1,8 +1,13 @@
 name: Simple Deploy to EC2
 
 on:
-  pull_request:
-    branches: [ main ]
+  push:
+    branches: [ master ]
+
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   deploy:
@@ -20,10 +25,10 @@ jobs:
         TAG="${{ github.sha }}-$(date +%Y%m%d-%H%M%S)"
         
         # Build the image with a simple tag
-        docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/ollama:$TAG .
+        docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/ollama-ui:$TAG .
         
         # Push the image to DockerHub
-        docker push ${{ secrets.DOCKERHUB_USERNAME }}/ollama:$TAG
+        docker push ${{ secrets.DOCKERHUB_USERNAME }}/ollama-ui:$TAG
         
         # Save the tag for later *steps* (if you need the tag value in another JOB, use artifacts, as seen in class)
         echo "IMAGE_TAG=$TAG" >> $GITHUB_ENV
@@ -34,7 +39,7 @@ jobs:
         host: ${{ secrets.EC2_PUBLIC_IP }}
         username: ubuntu
         key: ${{ secrets.EC2_SSH_KEY }}
-        source: "docker-compose.yaml"
+        source: "docker-compose.yml"
         target: "/home/ubuntu/"
 
     - name: Deploy to EC2
@@ -43,12 +48,17 @@ jobs:
         host: ${{ secrets.EC2_PUBLIC_IP }}
         username: ubuntu
         key: ${{ secrets.EC2_SSH_KEY }}
-        script: |       
-            # Stop and remove old containers
-            docker compose down
-            
-            echo """
-            OLLAMA_UI_IMG_TAG={{ env.IMAGE_TAG }}
-            """ > .env
-            
-            docker compose up -d
+        script: |
+            set -e
+            cd /home/ubuntu
+            # Stop and remove old containers if present
+            sudo docker compose down || true
+
+            # Write Compose environment variables for image selection
+            cat > .env <<EOF
+            OLLAMA_UI_IMG_TAG=${{ env.IMAGE_TAG }}
+            DOCKERHUB_USERNAME=${{ secrets.DOCKERHUB_USERNAME }}
+            EOF
+
+            # Deploy updated stack
+            sudo docker compose up -d
