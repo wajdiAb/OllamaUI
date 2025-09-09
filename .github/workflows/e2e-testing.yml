@@ -113,6 +113,12 @@ jobs:
         with:
           node-version: 20
 
+      - name: Install Chrome
+        uses: browser-actions/setup-chrome@v1
+
+      - name: Install Firefox
+        uses: browser-actions/setup-firefox@v1
+
       - name: Wait for app to be ready
         run: |
           echo "Waiting for $BASE_URL to be reachable..."
@@ -166,14 +172,37 @@ jobs:
             repl = (
                 "import os, tempfile\n"
                 "tmpdir = os.environ.get(\"SELENIUM_USER_DATA_DIR\") or tempfile.mkdtemp()\n"
+                "vp = os.environ.get('VIEWPORT')\n"
                 "try:\n    options.add_argument(f'--user-data-dir={tmpdir}')\nexcept Exception:\n    pass\n"
                 "options.add_argument('--no-sandbox')\n"
                 "options.add_argument('--disable-dev-shm-usage')\n"
                 "options.add_argument('--headless=new')\n"
+                "\n"
+                "# Apply viewport if provided\n"
+                "if vp and 'x' in vp:\n"
+                "    w,h = vp.split('x',1)\n"
+                "    try:\n        options.add_argument(f'--window-size={w},{h}')\n    except Exception:\n        pass\n"
                 "driver = webdriver.Chrome(options=options)"
             )
             if re.search(pattern, s):
                 s = re.sub(pattern, repl, s, count=1)
+                changed = True
+
+            # Inject CI-friendly flags for Firefox if present
+            pattern_ff = r"driver\s*=\s*webdriver\.Firefox\(options=options\)"
+            repl_ff = (
+                "import os, tempfile\n"
+                "tmpdir = os.environ.get(\"SELENIUM_USER_DATA_DIR\") or tempfile.mkdtemp()\n"
+                "vp = os.environ.get('VIEWPORT')\n"
+                "try:\n    options.add_argument('-headless')\nexcept Exception:\n    pass\n"
+                "try:\n    options.add_argument('-profile'); options.add_argument(tmpdir)\nexcept Exception:\n    pass\n"
+                "if vp and 'x' in vp:\n"
+                "    w,h = vp.split('x',1)\n"
+                "    try:\n        options.add_argument(f'--width={w}')\n        options.add_argument(f'--height={h}')\n    except Exception:\n        pass\n"
+                "driver = webdriver.Firefox(options=options)"
+            )
+            if re.search(pattern_ff, s):
+                s = re.sub(pattern_ff, repl_ff, s, count=1)
                 changed = True
 
             if changed:
