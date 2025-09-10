@@ -1,5 +1,4 @@
 services:
-  
   postgres:
     image: postgres:${POSTGRES_VERSION:-16}
     container_name: postgres
@@ -10,17 +9,23 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     restart: unless-stopped
-
+    pull_policy: always
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d predictions -h 127.0.0.1 -p 5432"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
 
   yolo:
-    image: wajdiab/yolo:${YOLO_IMG_TAG:-0.0.4}
-    container_name: YOLO_SERVICE
+    image: ${DOCKERHUB_USERNAME:-wajdiab}/yolo:${YOLO_IMG_TAG:-0.0.4}
+    container_name: yolo
     ports:
       - "8080:8080"
     volumes:
       - ./uploads:/app/uploads
-      - /home/wajdi/.aws/credentials:/root/.aws/credentials:ro
+      - ${AWS_CREDENTIALS_PATH:-/home/ubuntu/.aws/credentials}:/root/.aws/credentials:ro
     restart: unless-stopped
+    pull_policy: always
     environment:
       PYTHONUNBUFFERED: "1"
       DB_BACKEND: postgres
@@ -29,8 +34,20 @@ services:
       POSTGRES_USER: user
       POSTGRES_PASSWORD: pass
     depends_on:
-        - postgres
-        
+      postgres:
+        condition: service_healthy
+
+  # ollama:
+  #   image: ollama/ollama:latest
+  #   container_name: ollama
+  #   restart: unless-stopped
+  #   pull_policy: always
+  #   # Map the API in case you want to hit it directly from host (optional)
+  #   ports:
+  #     - "11434:11434"
+  #   # If you plan models persistence, uncomment:
+  #   # volumes:
+  #   #   - ollama_models:/root/.ollama
 
   ollama-ui:
     image: ${DOCKERHUB_USERNAME:-wajdiab}/ollama-ui:${OLLAMA_UI_IMG_TAG:-1.0.1}
@@ -39,15 +56,21 @@ services:
       - "3000:3000"
     volumes:
       - ./uploads:/app/uploads
-      - /home/wajdi/.aws/credentials:/root/.aws/credentials:ro
+      - ${AWS_CREDENTIALS_PATH:-/home/ubuntu/.aws/credentials}:/root/.aws/credentials:ro
     restart: unless-stopped
+    pull_policy: always
     environment:
       PORT: 3000
       YOLO_SERVICE: yolo:8080
       OLLAMA_URL: http://ollama:11434
-      AWS_REGION: eu-west-1
-      AWS_S3_BUCKET: wajdi-abu-rish
-
+      AWS_REGION: ${AWS_REGION:-eu-west-1}
+      AWS_S3_BUCKET: ${AWS_S3_BUCKET:-wajdi-abu-rish}
+    depends_on:
+      yolo:
+        condition: service_started
+      # ollama:
+      #   condition: service_started
 
 volumes:
   pgdata:
+  # ollama_models:
