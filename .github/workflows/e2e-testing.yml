@@ -190,7 +190,7 @@ jobs:
           fi
 
 
-            - name: Patch Selenium driver for CI isolation
+      - name: Patch Selenium driver for CI isolation
         if: hashFiles('e2e/utils/Driver_factory.py') != ''   # run only if file exists
         working-directory: e2e
         shell: bash
