@@ -162,17 +162,10 @@ jobs:
 
       # If your tests repo is Python-based (pytest + selenium)
       - name: Install E2E dependencies (Python)
-        working-directory: e2e
         shell: bash
         run: |
-          python -m pip install --upgrade pip
-          # Filter accidental 'allure' line (not a PyPI package)
-          if grep -Eq '^allure(==.*)?$' requirements.txt; then
-            sed -E '/^allure(==.*)?$/d' requirements.txt > requirements.filtered.txt
-            pip install -r requirements.filtered.txt
-          else
             pip install -r requirements.txt
-          fi
+
           
       - name: Run Selenium tests
         env:
