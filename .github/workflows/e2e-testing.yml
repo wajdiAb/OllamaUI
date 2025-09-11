@@ -136,10 +136,10 @@ jobs:
       - name: Checkout E2E tests repo
         uses: actions/checkout@v4
         with:
-          repository: wajdiAb/OllamaUITesting
-          path: e2e
-          token: ${{ secrets.UI_TESTING_GITHUB_TOKEN }}
           fetch-depth: 1
+          repository: wajdiAb/OllamaUITesting
+          token: ${{ secrets.UI_TESTING_GITHUB_TOKEN }}
+          
 
       - name: Install Chrome
         uses: browser-actions/setup-chrome@v1
