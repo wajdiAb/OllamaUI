@@ -125,7 +125,20 @@ jobs:
       fail-fast: false  # Continue other jobs even if one fails
     
     env:
+      # target
       BASE_URL: http://${{ secrets.EC2_PUBLIC_IP }}:3000
+      # matrix
+      BROWSER: ${{ matrix.browser }}
+      SCREEN_WIDTH: ${{ matrix.resolution.width }}
+      SCREEN_HEIGHT: ${{ matrix.resolution.height }}
+      # workflow_dispatch input (fallback for PRs)
+      ENVIRONMENT: ${{ github.event.inputs.environment || 'staging' }}
+      # values from deploy outputs
+      OLLAMA_VERSION: ${{ needs.deploy.outputs.image_tag }}
+      OLLAMA_UI_IMG_TAG: ${{ needs.deploy.outputs.image_tag }}
+      YOLO_VERSION: ${{ needs.deploy.outputs.yolo_tag }}
+      YOLO_IMG_TAG: ${{ needs.deploy.outputs.yolo_tag }}
+      POSTGRES_VERSION: ${{ needs.deploy.outputs.postgres_version }}
 
     steps:
       - name: Checkout E2E tests repo
@@ -138,23 +151,24 @@ jobs:
       - name: Pre-create Allure environment.properties
         run: |
           mkdir -p allure-results
-          cat > allure-results/environment.properties <<EOF
+          cat > allure-results/environment.properties <<'EOF'
           Test.Framework=Selenium+Pytest
           CI.Platform=GitHub Actions
           Test.Types=UI Automation
-          Browser=${BROWSER}
-          Resolution=${SCREEN_WIDTH}x${SCREEN_HEIGHT}
+          Browsers=${BROWSER}
+          Resolutions=${SCREEN_WIDTH}x${SCREEN_HEIGHT}
           Environment=${ENVIRONMENT}
-          Target.URL=${OLLAMA_URL}
-          Ollama.Version=${OLLAMA_VERSION}
-          Ollama.Image=${OLLAMA_UI_IMG_TAG}
-          YOLO.Version=${YOLO_VERSION}
-          YOLO.Image=${YOLO_IMG_TAG}
-          Postgres.Version=${POSTGRES_VERSION}
+          Target.URL=${BASE_URL}
+          Ollama.Version=${OLLAMA_VERSION:-n/a}
+          Ollama.Image=${OLLAMA_UI_IMG_TAG:-n/a}
+          YOLO.Version=${YOLO_VERSION:-n/a}
+          YOLO.Image=${YOLO_IMG_TAG:-n/a}
+          Postgres.Version=${POSTGRES_VERSION:-n/a}
           Git.Commit=${GITHUB_SHA}
           Git.Ref=${GITHUB_REF}
           EOF
-          echo "Created allure-results/environment.properties:"; cat allure-results/environment.properties
+          echo "== environment.properties ==" && cat allure-results/environment.properties
+
 
       - name: Install Chrome
         uses: browser-actions/setup-chrome@v1
