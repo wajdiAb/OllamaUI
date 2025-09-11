@@ -6,13 +6,21 @@ on:
   pull_request:
     branches: [ main, master ]
   workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to test against'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - development
+          - staging
+          - production
 
 permissions:
-  contents: write
-
-concurrency:
-  group: e2e-${{ github.ref }}
-  cancel-in-progress: true
+  contents: read
+  pages: write
+  id-token: write
 
 jobs:
   deploy:
@@ -107,9 +115,127 @@ jobs:
             sudo docker compose logs --no-color || true
             exit 1
 
+ # .github/workflows/deploy-and-e2e.yaml
+name: Simple Deploy to EC2
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to test against'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - development
+          - staging
+          - production
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  deploy:
+    # Run on push / internal PRs only (skip forks so secrets are safe)
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo_full_name == github.repository
+    runs-on: ubuntu-latest
+    env:
+      YOLO_IMG_TAG: "0.0.4"
+      POSTGRES_VERSION: "16"
+    outputs:
+      image_tag: ${{ steps.build.outputs.image_tag }}
+      yolo_tag: ${{ env.YOLO_IMG_TAG }}
+      postgres_version: ${{ env.POSTGRES_VERSION }}
+
+    steps:
+      - name: Checkout app repo
+        uses: actions/checkout@v4
+
+      - name: Login to DockerHub
+        run: echo ${{ secrets.DOCKERHUB_PASSWORD }} | docker login -u ${{ secrets.DOCKERHUB_USERNAME }} --password-stdin
+
+      - name: Build and push Docker image
+        id: build
+        run: |
+          TAG="${{ github.sha }}-$(date +%Y%m%d-%H%M%S)"
+          docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/ollama-ui:$TAG .
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/ollama-ui:$TAG
+          echo "IMAGE_TAG=$TAG" >> $GITHUB_ENV
+          echo "image_tag=$TAG" >> $GITHUB_OUTPUT
+
+      - name: Copy docker-compose file to EC2
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.EC2_PUBLIC_IP }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          source: "docker-compose.yml"
+          target: "/home/ubuntu/"
+
+      - name: Deploy to EC2
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_PUBLIC_IP }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            set -e
+            cd /home/ubuntu
+
+            # Ensure docker compose plugin is available
+            docker compose version || { sudo apt-get update -y && sudo apt-get install -y docker-compose-plugin; }
+
+            # Stop and remove previous stack if exists
+            sudo docker compose down || true
+
+            echo "Disk usage before cleanup:" && df -h || true
+            echo "Docker disk usage before cleanup:" && sudo docker system df || true
+
+            # Clean up images/containers/build cache (keeps named volumes like Postgres data)
+            sudo docker container prune -f || true
+            sudo docker image prune -af || true
+            sudo docker builder prune -af || true
+
+            # Create/overwrite .env for compose (values from workflow)
+            cat > .env <<EOF
+            OLLAMA_UI_IMG_TAG=${{ steps.build.outputs.image_tag }}
+            DOCKERHUB_USERNAME=${{ secrets.DOCKERHUB_USERNAME }}
+            YOLO_IMG_TAG=${{ env.YOLO_IMG_TAG }}
+            POSTGRES_VERSION=${{ env.POSTGRES_VERSION }}
+            EOF
+
+            # Pull images early to fail fast if tag missing
+            sudo docker compose pull || true
+
+            echo "Disk usage after cleanup:" && df -h || true
+            echo "Docker disk usage after cleanup:" && sudo docker system df || true
+
+            # Start stack
+            sudo docker compose up -d --remove-orphans
+
+            # Basic health check for UI
+            for i in {1..30}; do
+              if curl -fsS http://localhost:3000/ >/dev/null 2>&1; then
+                echo "UI is up."
+                exit 0
+              fi
+              echo "Waiting for UI... ($i/30)"
+              sleep 5
+            done
+            echo "UI did not become ready in time."
+            sudo docker compose ps || true
+            sudo docker compose logs --no-color || true
+            exit 1
+
   e2e:
     name: E2E Tests
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo_full_name == github.repository
     runs-on: ubuntu-latest
     needs: deploy
     strategy:
@@ -119,6 +245,7 @@ jobs:
         resolution: ["1920x1080", "1366x768"]
     env:
       BASE_URL: http://${{ secrets.EC2_PUBLIC_IP }}:3000
+      ENVIRONMENT: ${{ github.event.inputs.environment || 'staging' }}
 
     steps:
       - name: Checkout E2E tests repo
@@ -153,7 +280,8 @@ jobs:
           echo "Waiting for $BASE_URL to be reachable..."
           for i in {1..60}; do
             if curl -fsS "$BASE_URL" >/dev/null; then
-              echo "App is up"; exit 0;
+              echo "App is up"
+              exit 0
             fi
             sleep 5
           done
@@ -166,19 +294,14 @@ jobs:
         with:
           python-version: '3.11'
 
-            # If your tests repo is Node-based
       - name: Install E2E dependencies (Node)
         if: hashFiles('e2e/package.json') != ''
         working-directory: e2e
-        shell: bash
-        run: |
-          npm ci
+        run: npm ci
 
-      # If your tests repo is Python-based (pytest + selenium)
       - name: Install E2E dependencies (Python)
         if: hashFiles('e2e/requirements.txt') != ''
         working-directory: e2e
-        shell: bash
         run: |
           python -m pip install --upgrade pip
           # Filter accidental 'allure' line (not a PyPI package)
@@ -189,24 +312,18 @@ jobs:
             pip install -r requirements.txt
           fi
 
-
       - name: Patch Selenium driver for CI isolation
-        if: hashFiles('e2e/utils/Driver_factory.py') != ''   # run only if file exists
+        if: hashFiles('e2e/utils/Driver_factory.py') != ''
         working-directory: e2e
         shell: bash
         run: |
           python3 - <<'PY'
           import os, re, sys, pathlib
-
           p = pathlib.Path('utils/Driver_factory.py')
           if not p.exists():
               print('No utils/Driver_factory.py; skipping patch.')
               sys.exit(0)
-
-          s = p.read_text(encoding='utf-8')
-          changed = False
-
-          # ---- Chrome patch ----
+          s = p.read_text(encoding='utf-8'); changed = False
           chrome_rx = r"driver\s*=\s*webdriver\.Chrome\(options=options\)"
           chrome_new = """import tempfile,os
           tmpdir=os.environ.get("SELENIUM_USER_DATA_DIR") or tempfile.mkdtemp()
@@ -221,11 +338,7 @@ jobs:
               try: options.add_argument(f'--window-size={w},{h}')
               except: pass
           driver=webdriver.Chrome(options=options)"""
-          s2 = re.sub(chrome_rx, chrome_new, s)
-          changed |= (s2 != s)
-          s = s2
-
-          # ---- Firefox patch ----
+          s2 = re.sub(chrome_rx, chrome_new, s); changed |= (s2 != s); s = s2
           ff_rx = r"driver\s*=\s*webdriver\.Firefox\(options=options\)"
           ff_new = """import tempfile,os
           tmpdir=os.environ.get("SELENIUM_USER_DATA_DIR") or tempfile.mkdtemp()
@@ -242,19 +355,20 @@ jobs:
                   options.add_argument(f'--height={h}')
               except: pass
           driver=webdriver.Firefox(options=options)"""
-          s2 = re.sub(ff_rx, ff_new, s)
-          changed |= (s2 != s)
-          s = s2
-
-          if changed:
-              p.write_text(s, encoding='utf-8')
-              print('Patched Selenium driver for CI.')
-          else:
-              print('No driver patterns matched; skipping.')
+          s2 = re.sub(ff_rx, ff_new, s); changed |= (s2 != s); s = s2
+          if changed: p.write_text(s, encoding='utf-8'); print('Patched Selenium driver for CI.')
+          else: print('No driver patterns matched; skipping.')
           PY
 
-
       - name: Run Selenium E2E tests
+        working-directory: e2e
+        env:
+          BROWSER: ${{ matrix.browser }}
+          VIEWPORT: ${{ matrix.resolution }}
+          SCREEN_WIDTH: ${{ fromJSON('["' + matrix.resolution + '"]')[0].split('x')[0] }}
+          SCREEN_HEIGHT: ${{ fromJSON('["' + matrix.resolution + '"]')[0].split('x')[1] }}
+          SELENIUM_USER_DATA_DIR: ${{ runner.temp }}/selenium-${{ matrix.browser }}-${{ matrix.resolution }}-${{ github.run_id }}-${{ strategy.job-index }}
+          BASE_URL: ${{ env.BASE_URL }}
         shell: bash
         run: |
           mkdir -p allure-results
@@ -262,20 +376,17 @@ jobs:
           BASE_URL=${BASE_URL}
           BROWSER=${BROWSER}
           VIEWPORT=${VIEWPORT}
-          OLLAMA_UI_IMG_TAG=${OLLAMA_UI_IMG_TAG}
-          YOLO_IMG_TAG=${YOLO_IMG_TAG}
-          POSTGRES_VERSION=${POSTGRES_VERSION}
           ENVVARS
 
           if [ -f package.json ]; then
             npm test
-          elif [ -f requirements.txt ]; then
+          elif [ -f requirements.txt ] || [ -f requirements.filtered.txt ]; then
             pytest -s --alluredir=allure-results
           else
-            echo "No test runner detected" >&2
+            echo "No test runner detected in $(pwd)" >&2
+            ls -la
             exit 1
           fi
-
 
       - name: Upload Allure results
         if: always()
@@ -284,6 +395,32 @@ jobs:
           name: allure-results-${{ matrix.browser }}-${{ matrix.resolution }}
           path: e2e/allure-results
           if-no-files-found: warn
+
+  allure-report:
+    name: Allure Report
+    runs-on: ubuntu-latest
+    needs: e2e
+    if: always()
+
+    steps:
+      - name: Download Allure results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: allure-results-*
+          merge-multiple: true
+          path: ./allure-results
+
+      - name: Generate Allure report
+        uses: simple-elf/allure-report-action@v1.7
+        with:
+          allure_results: ./allure-results
+
+      - name: Upload Allure report artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-report
+          path: allure-report
+
 
   allure-report:
     name: Allure Report
