@@ -1,8 +1,6 @@
 name: Simple Deploy to EC2
 #
 on:
-  push:
-    branches: [ main, master ]
   pull_request:
     branches: [ main, master ]
   workflow_dispatch:
@@ -20,12 +18,10 @@ on:
 permissions:
   contents: read
   pages: write
-  
+  id-token: write
 
 jobs:
   deploy:
-    # Run on push / internal PRs only (skip forks so secrets are safe)
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     env:
       YOLO_IMG_TAG: "0.0.4"
@@ -117,7 +113,6 @@ jobs:
 
   e2e:
     name: E2E Tests
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     needs: deploy
     strategy:
@@ -160,7 +155,6 @@ jobs:
           exit 1
 
       - name: Setup Python (if needed)
-        if: hashFiles('e2e/requirements.txt') != ''
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -168,7 +162,6 @@ jobs:
 
       # If your tests repo is Python-based (pytest + selenium)
       - name: Install E2E dependencies (Python)
-        if: hashFiles('e2e/requirements.txt') != ''
         working-directory: e2e
         shell: bash
         run: |
@@ -180,71 +173,6 @@ jobs:
           else
             pip install -r requirements.txt
           fi
-
-
-      - name: Patch Selenium driver for CI isolation
-        if: hashFiles('e2e/utils/Driver_factory.py') != ''   # run only if file exists
-        working-directory: e2e
-        shell: bash
-        run: |
-          python3 - <<'PY'
-          import os, re, sys, pathlib
-
-          p = pathlib.Path('utils/Driver_factory.py')
-          if not p.exists():
-              print('No utils/Driver_factory.py; skipping patch.')
-              sys.exit(0)
-
-          s = p.read_text(encoding='utf-8')
-          changed = False
-
-          # ---- Chrome patch ----
-          chrome_rx = r"driver\s*=\s*webdriver\.Chrome\(options=options\)"
-          chrome_new = """import tempfile,os
-          tmpdir=os.environ.get("SELENIUM_USER_DATA_DIR") or tempfile.mkdtemp()
-          vp=os.environ.get('VIEWPORT')
-          try: options.add_argument(f'--user-data-dir={tmpdir}')
-          except: pass
-          options.add_argument('--no-sandbox')
-          options.add_argument('--disable-dev-shm-usage')
-          options.add_argument('--headless=new')
-          if vp and 'x' in vp:
-              w,h=vp.split('x',1)
-              try: options.add_argument(f'--window-size={w},{h}')
-              except: pass
-          driver=webdriver.Chrome(options=options)"""
-          s2 = re.sub(chrome_rx, chrome_new, s)
-          changed |= (s2 != s)
-          s = s2
-
-          # ---- Firefox patch ----
-          ff_rx = r"driver\s*=\s*webdriver\.Firefox\(options=options\)"
-          ff_new = """import tempfile,os
-          tmpdir=os.environ.get("SELENIUM_USER_DATA_DIR") or tempfile.mkdtemp()
-          vp=os.environ.get('VIEWPORT')
-          try: options.add_argument('-headless')
-          except: pass
-          try:
-              options.add_argument('-profile'); options.add_argument(tmpdir)
-          except: pass
-          if vp and 'x' in vp:
-              w,h=vp.split('x',1)
-              try:
-                  options.add_argument(f'--width={w}')
-                  options.add_argument(f'--height={h}')
-              except: pass
-          driver=webdriver.Firefox(options=options)"""
-          s2 = re.sub(ff_rx, ff_new, s)
-          changed |= (s2 != s)
-          s = s2
-
-          if changed:
-              p.write_text(s, encoding='utf-8')
-              print('Patched Selenium driver for CI.')
-          else:
-              print('No driver patterns matched; skipping.')
-          PY
-
           
       - name: Run Selenium tests
         env:
