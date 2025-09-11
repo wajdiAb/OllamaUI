@@ -1,8 +1,6 @@
 name: Simple Deploy to EC2
 #
 on:
-  push:
-    branches: [ main, master ]
   pull_request:
     branches: [ main, master ]
   workflow_dispatch:
@@ -20,12 +18,10 @@ on:
 permissions:
   contents: read
   pages: write
-  
+  id-token: write
 
 jobs:
   deploy:
-    # Run on push / internal PRs only (skip forks so secrets are safe)
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     env:
       YOLO_IMG_TAG: "0.0.4"
@@ -117,7 +113,6 @@ jobs:
 
   e2e:
     name: E2E Tests
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     needs: deploy
     strategy:
@@ -130,7 +125,20 @@ jobs:
       fail-fast: false  # Continue other jobs even if one fails
     
     env:
+      # target
       BASE_URL: http://${{ secrets.EC2_PUBLIC_IP }}:3000
+      # matrix
+      BROWSER: ${{ matrix.browser }}
+      SCREEN_WIDTH: ${{ matrix.resolution.width }}
+      SCREEN_HEIGHT: ${{ matrix.resolution.height }}
+      # workflow_dispatch input (fallback for PRs)
+      ENVIRONMENT: ${{ github.event.inputs.environment || 'staging' }}
+      # values from deploy outputs
+      OLLAMA_VERSION: ${{ needs.deploy.outputs.image_tag }}
+      OLLAMA_UI_IMG_TAG: ${{ needs.deploy.outputs.image_tag }}
+      YOLO_VERSION: ${{ needs.deploy.outputs.yolo_tag }}
+      YOLO_IMG_TAG: ${{ needs.deploy.outputs.yolo_tag }}
+      POSTGRES_VERSION: ${{ needs.deploy.outputs.postgres_version }}
 
     steps:
       - name: Checkout E2E tests repo
@@ -140,12 +148,48 @@ jobs:
           repository: wajdiAb/OllamaUITesting
           token: ${{ secrets.UI_TESTING_GITHUB_TOKEN }}
           
+      - name: Pre-create Allure environment.properties
+        run: |
+          mkdir -p allure-results
+          cat > allure-results/environment.properties <<'EOF'
+          Test.Framework=Selenium+Pytest
+          CI.Platform=GitHub Actions
+          Test.Types=UI Automation
+          Browsers=${BROWSER}
+          Resolutions=${SCREEN_WIDTH}x${SCREEN_HEIGHT}
+          Environment=${ENVIRONMENT}
+          Target.URL=${BASE_URL}
+          Ollama.Version=${OLLAMA_VERSION:-n/a}
+          Ollama.Image=${OLLAMA_UI_IMG_TAG:-n/a}
+          YOLO.Version=${YOLO_VERSION:-n/a}
+          YOLO.Image=${YOLO_IMG_TAG:-n/a}
+          Postgres.Version=${POSTGRES_VERSION:-n/a}
+          Git.Commit=${GITHUB_SHA}
+          Git.Ref=${GITHUB_REF}
+          EOF
+          echo "== environment.properties ==" && cat allure-results/environment.properties
+
 
       - name: Install Chrome
         uses: browser-actions/setup-chrome@v1
 
-      - name: Install Firefox
-        uses: browser-actions/setup-firefox@v1
+      - name: Install Firefox and GeckoDriver
+        if: matrix.browser == 'firefox'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wget tar
+          # Remove Snap Firefox if installed
+          sudo snap remove firefox || true
+          # Download official Firefox
+          wget -O firefox.tar.xz "https://download.mozilla.org/?product=firefox-latest&os=linux64&lang=en-US"
+          tar xJf firefox.tar.xz
+          sudo mv firefox /opt/firefox
+          sudo ln -s /opt/firefox/firefox /usr/local/bin/firefox
+          # Install GeckoDriver
+          wget https://github.com/mozilla/geckodriver/releases/latest/download/geckodriver-v0.36.0-linux64.tar.gz
+          tar -xvzf geckodriver-v0.36.0-linux64.tar.gz
+          sudo mv geckodriver /usr/local/bin/
+          sudo chmod +x /usr/local/bin/geckodriver
 
       - name: Wait for app to be ready
         run: |
@@ -160,7 +204,6 @@ jobs:
           exit 1
 
       - name: Setup Python (if needed)
-        if: hashFiles('e2e/requirements.txt') != ''
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -168,82 +211,9 @@ jobs:
 
       # If your tests repo is Python-based (pytest + selenium)
       - name: Install E2E dependencies (Python)
-        if: hashFiles('e2e/requirements.txt') != ''
-        working-directory: e2e
         shell: bash
         run: |
-          python -m pip install --upgrade pip
-          # Filter accidental 'allure' line (not a PyPI package)
-          if grep -Eq '^allure(==.*)?$' requirements.txt; then
-            sed -E '/^allure(==.*)?$/d' requirements.txt > requirements.filtered.txt
-            pip install -r requirements.filtered.txt
-          else
             pip install -r requirements.txt
-          fi
-
-
-      - name: Patch Selenium driver for CI isolation
-        if: hashFiles('e2e/utils/Driver_factory.py') != ''   # run only if file exists
-        working-directory: e2e
-        shell: bash
-        run: |
-          python3 - <<'PY'
-          import os, re, sys, pathlib
-
-          p = pathlib.Path('utils/Driver_factory.py')
-          if not p.exists():
-              print('No utils/Driver_factory.py; skipping patch.')
-              sys.exit(0)
-
-          s = p.read_text(encoding='utf-8')
-          changed = False
-
-          # ---- Chrome patch ----
-          chrome_rx = r"driver\s*=\s*webdriver\.Chrome\(options=options\)"
-          chrome_new = """import tempfile,os
-          tmpdir=os.environ.get("SELENIUM_USER_DATA_DIR") or tempfile.mkdtemp()
-          vp=os.environ.get('VIEWPORT')
-          try: options.add_argument(f'--user-data-dir={tmpdir}')
-          except: pass
-          options.add_argument('--no-sandbox')
-          options.add_argument('--disable-dev-shm-usage')
-          options.add_argument('--headless=new')
-          if vp and 'x' in vp:
-              w,h=vp.split('x',1)
-              try: options.add_argument(f'--window-size={w},{h}')
-              except: pass
-          driver=webdriver.Chrome(options=options)"""
-          s2 = re.sub(chrome_rx, chrome_new, s)
-          changed |= (s2 != s)
-          s = s2
-
-          # ---- Firefox patch ----
-          ff_rx = r"driver\s*=\s*webdriver\.Firefox\(options=options\)"
-          ff_new = """import tempfile,os
-          tmpdir=os.environ.get("SELENIUM_USER_DATA_DIR") or tempfile.mkdtemp()
-          vp=os.environ.get('VIEWPORT')
-          try: options.add_argument('-headless')
-          except: pass
-          try:
-              options.add_argument('-profile'); options.add_argument(tmpdir)
-          except: pass
-          if vp and 'x' in vp:
-              w,h=vp.split('x',1)
-              try:
-                  options.add_argument(f'--width={w}')
-                  options.add_argument(f'--height={h}')
-              except: pass
-          driver=webdriver.Firefox(options=options)"""
-          s2 = re.sub(ff_rx, ff_new, s)
-          changed |= (s2 != s)
-          s = s2
-
-          if changed:
-              p.write_text(s, encoding='utf-8')
-              print('Patched Selenium driver for CI.')
-          else:
-              print('No driver patterns matched; skipping.')
-          PY
 
           
       - name: Run Selenium tests
@@ -255,6 +225,11 @@ jobs:
           OLLAMA_URL: http://${{secrets.EC2_PUBLIC_IP}}:3000
           TEST_NAME: ${{ matrix.browser }}-${{ matrix.resolution.name }}
           ENVIRONMENT: ${{ github.event.inputs.environment || 'staging' }}
+          YOLO_VERSION: ${{ env.YOLO_VERSION }}
+          YOLO_IMG_TAG: ${{ env.YOLO_IMG_TAG }}
+          OLLAMA_VERSION: ${{ env.OLLAMA_VERSION }}
+          OLLAMA_UI_IMG_TAG: ${{ env.OLLAMA_UI_IMG_TAG }}
+          POSTGRES_VERSION: ${{ env.POSTGRES_VERSION }}
         run: |
           mkdir -p allure-results
           # Run your tests here with unique result directory
@@ -272,6 +247,7 @@ jobs:
     name: Allure Report
     runs-on: ubuntu-latest
     needs: e2e
+    if: always()
 
     steps:
       - name: Download Allure results
@@ -280,14 +256,35 @@ jobs:
           pattern: allure-results-*
           merge-multiple: true
           path: ./allure-results
-
-      - name: Generate Allure report
-        uses: simple-elf/allure-report-action@v1.7
+      
+      - name: Merge all results into single directory
+        run: |
+          mkdir -p allure-results
+          for dir in allure-results-downloaded/*/; do
+            if [ -d "$dir" ]; then
+              cp -r "$dir"* allure-results/ 2>/dev/null || true
+            fi
+          done
+      
+      
+      - name: Generate and Deploy Allure Report
+        uses: simple-elf/allure-report-action@master
         with:
-          allure_results: ./allure-results
+          allure_results: allure-results
+          allure_report: allure-report
+          gh_pages: gh-pages
+          allure_history: allure-history
+          keep_reports: 20
 
       - name: Upload Allure report artifact
         uses: actions/upload-artifact@v4
         with:
           name: allure-report
           path: allure-report
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.UI_TESTING_GITHUB_TOKEN }}
+          publish_dir: ./allure-report
+
