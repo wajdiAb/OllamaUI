@@ -255,15 +255,7 @@ jobs:
 
 
       - name: Run Selenium E2E tests
-        working-directory: e2e
-        env:
-          BASE_URL: ${{ env.BASE_URL }}
-          BROWSER: ${{ matrix.browser }}
-          VIEWPORT: ${{ matrix.resolution }}
-          OLLAMA_UI_IMG_TAG: ${{ needs.deploy.outputs.image_tag }}
-          YOLO_IMG_TAG: ${{ needs.deploy.outputs.yolo_tag }}
-          POSTGRES_VERSION: ${{ needs.deploy.outputs.postgres_version }}
-          SELENIUM_USER_DATA_DIR: ${{ runner.temp }}/selenium-profile-${{ matrix.browser }}-${{ matrix.resolution }}-${{ github.run_id }}-${{ github.run_attempt }}
+        shell: bash
         run: |
           mkdir -p allure-results
           cat > allure-results/environment.properties <<ENVVARS
@@ -282,6 +274,8 @@ jobs:
           else
             echo "No test runner detected" >&2
             exit 1
+          fi
+
 
       - name: Upload Allure results
         if: always()
