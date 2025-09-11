@@ -155,7 +155,7 @@ jobs:
           Git.Ref=${GITHUB_REF}
           EOF
           echo "Created allure-results/environment.properties:"; cat allure-results/environment.properties
-          
+
       - name: Install Chrome
         uses: browser-actions/setup-chrome@v1
 
@@ -266,6 +266,6 @@ jobs:
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
+          github_token: ${{ secrets.UI_TESTING_GITHUB_TOKEN }}
           publish_dir: ./allure-report
 
