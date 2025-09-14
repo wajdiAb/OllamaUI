@@ -148,26 +148,26 @@ jobs:
           repository: wajdiAb/OllamaUITesting
           token: ${{ secrets.UI_TESTING_GITHUB_TOKEN }}
           
-      - name: Pre-create Allure environment.properties
-        run: |
-          mkdir -p allure-results
-          cat > allure-results/environment.properties <<'EOF'
-          Test.Framework=Selenium+Pytest
-          CI.Platform=GitHub Actions
-          Test.Types=UI Automation
-          Browsers=${BROWSER}
-          Resolutions=${SCREEN_WIDTH}x${SCREEN_HEIGHT}
-          Environment=${ENVIRONMENT}
-          Target.URL=${BASE_URL}
-          Ollama.Version=${OLLAMA_VERSION:-n/a}
-          Ollama.Image=${OLLAMA_UI_IMG_TAG:-n/a}
-          YOLO.Version=${YOLO_VERSION:-n/a}
-          YOLO.Image=${YOLO_IMG_TAG:-n/a}
-          Postgres.Version=${POSTGRES_VERSION:-n/a}
-          Git.Commit=${GITHUB_SHA}
-          Git.Ref=${GITHUB_REF}
-          EOF
-          echo "== environment.properties ==" && cat allure-results/environment.properties
+      # - name: Pre-create Allure environment.properties
+      #   run: |
+      #     mkdir -p allure-results
+      #     cat > allure-results/environment.properties <<'EOF'
+      #     Test.Framework=Selenium+Pytest
+      #     CI.Platform=GitHub Actions
+      #     Test.Types=UI Automation
+      #     Browsers=${BROWSER}
+      #     Resolutions=${SCREEN_WIDTH}x${SCREEN_HEIGHT}
+      #     Environment=${ENVIRONMENT}
+      #     Target.URL=${BASE_URL}
+      #     Ollama.Version=${OLLAMA_VERSION:-n/a}
+      #     Ollama.Image=${OLLAMA_UI_IMG_TAG:-n/a}
+      #     YOLO.Version=${YOLO_VERSION:-n/a}
+      #     YOLO.Image=${YOLO_IMG_TAG:-n/a}
+      #     Postgres.Version=${POSTGRES_VERSION:-n/a}
+      #     Git.Commit=${GITHUB_SHA}
+      #     Git.Ref=${GITHUB_REF}
+      #     EOF
+      #     echo "== environment.properties ==" && cat allure-results/environment.properties
 
 
       - name: Install Chrome
