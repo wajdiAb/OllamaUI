@@ -147,7 +147,7 @@ jobs:
           fetch-depth: 1
           repository: wajdiAb/OllamaUITesting
           token: ${{ secrets.UI_TESTING_GITHUB_TOKEN }}
-          
+          # 
       # - name: Pre-create Allure environment.properties
       #   run: |
       #     mkdir -p allure-results
